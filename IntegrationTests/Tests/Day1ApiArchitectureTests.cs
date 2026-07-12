@@ -1,6 +1,9 @@
 using FluentAssertions;
 using IntegrationTests.Assertions;
 using IntegrationTests.Contracts;
+using System.Net;
+using System.Net.Http;
+using System.Text;
 
 namespace IntegrationTests.Tests;
 
@@ -38,5 +41,31 @@ public sealed class Day1ApiArchitectureTests
         await ApiAssertions.AssertAcceptedAsync(response);
 
         Day1Fixture.FakeServer.ReceivedWebhooks.Should().ContainSingle(w => w.CorrelationId == correlationId);
+    }
+
+    [Test]
+    public async Task ApiOrderContract_WhenOrderMissing_ShouldThrowWithStatusCode()
+    {
+        await using var api = await Day1Fixture.Playwright.APIRequest.NewContextAsync(Day1Fixture.Client.BuildRequestOptions());
+
+        var action = async () => await Day1Fixture.Client.GetOrderAsync(api, "999");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Status=404*");
+    }
+
+    [Test]
+    public async Task WebhookIngestion_WhenPayloadIsMalformed_ShouldReturnBadRequest()
+    {
+        using var httpClient = new HttpClient
+        {
+            BaseAddress = new Uri(Day1Fixture.Context.ApiSettings.BaseUrl),
+            Timeout = TimeSpan.FromSeconds(Day1Fixture.Context.ApiSettings.TimeoutSeconds)
+        };
+
+        using var content = new StringContent("{\"eventType\":\"crm.customer.updated\",\"payload\":\"oops\"}", Encoding.UTF8, "application/json");
+        var response = await httpClient.PostAsync("/webhooks/salesforce", content);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 }

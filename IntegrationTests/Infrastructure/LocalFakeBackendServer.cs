@@ -56,32 +56,54 @@ public sealed class LocalFakeBackendServer : IDisposable
         var request = context.Request;
         var response = context.Response;
 
-        if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/api/orders/123")
+        try
         {
-            var payload = new OrderResponse("123", "Processed", 149.95m, "USD", DateTimeOffset.UtcNow);
-            await WriteJsonAsync(response, payload, HttpStatusCode.OK, cancellationToken);
-            return;
-        }
-
-        if (request.HttpMethod == "POST" && request.Url?.AbsolutePath == "/webhooks/salesforce")
-        {
-            using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
-            var body = await reader.ReadToEndAsync(cancellationToken);
-            var envelope = JsonSerializer.Deserialize<WebhookEnvelope>(body, JsonOptions.Default)
-                ?? throw new InvalidOperationException("Invalid webhook payload");
-
-            lock (ReceivedWebhooks)
+            if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/api/orders/123")
             {
-                ReceivedWebhooks.Add(envelope);
+                var payload = new OrderResponse("123", "Processed", 149.95m, "USD", DateTimeOffset.UtcNow);
+                await WriteJsonAsync(response, payload, HttpStatusCode.OK, cancellationToken);
+                return;
             }
 
-            await WriteJsonAsync(response, new { accepted = true, correlationId = envelope.CorrelationId }, HttpStatusCode.Accepted, cancellationToken);
-            return;
-        }
+            if (request.HttpMethod == "POST" && request.Url?.AbsolutePath == "/webhooks/salesforce")
+            {
+                using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
+                var body = await reader.ReadToEndAsync(cancellationToken);
+                var envelope = JsonSerializer.Deserialize<WebhookEnvelope>(body, JsonOptions.Default)
+                    ?? throw new InvalidOperationException("Invalid webhook payload");
 
-        response.StatusCode = (int)HttpStatusCode.NotFound;
-        await response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("Not Found"), cancellationToken);
-        response.Close();
+                if (string.IsNullOrWhiteSpace(envelope.CorrelationId))
+                {
+                    response.StatusCode = (int)HttpStatusCode.BadRequest;
+                    await response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("Missing correlationId"), cancellationToken);
+                    response.Close();
+                    return;
+                }
+
+                lock (ReceivedWebhooks)
+                {
+                    ReceivedWebhooks.Add(envelope);
+                }
+
+                await WriteJsonAsync(response, new { accepted = true, correlationId = envelope.CorrelationId }, HttpStatusCode.Accepted, cancellationToken);
+                return;
+            }
+
+            response.StatusCode = (int)HttpStatusCode.NotFound;
+            await response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("Not Found"), cancellationToken);
+            response.Close();
+        }
+        catch (JsonException)
+        {
+            response.StatusCode = (int)HttpStatusCode.BadRequest;
+            await response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("Invalid JSON payload"), cancellationToken);
+            response.Close();
+        }
+        catch (Exception)
+        {
+            response.StatusCode = (int)HttpStatusCode.InternalServerError;
+            response.Close();
+        }
     }
 
     private static async Task WriteJsonAsync(HttpListenerResponse response, object payload, HttpStatusCode statusCode, CancellationToken cancellationToken)
