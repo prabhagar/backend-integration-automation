@@ -66,4 +66,4 @@ public sealed class BackendApiClient
             Timeout = _settings.TimeoutSeconds * 1000
         };
     }
-}
+} 
