@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Allure.NUnit;
 using IntegrationTests.Assertions;
 using IntegrationTests.Contracts;
 using System.Net;
@@ -8,6 +9,7 @@ using System.Text;
 namespace IntegrationTests.Tests;
 
 [TestFixture]
+[AllureNUnit]
 public sealed class Day1ApiArchitectureTests
 {
     [Test]
